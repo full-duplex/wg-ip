@@ -30,6 +30,9 @@ help(){
 	        generate an ip from the pubkey, in the specified subnet.
 	        when the --asnet option is used, the generated ip is cut to
 	        length to generate a subnet prefix instead of a whole ip.
+	    gensub <iface>:
+	        generate an ipv6 subnet prefix based on the specified interface
+	        name.
 	    dryrun:
 	        generate an ip from the pubkey of the specified interface (see
 	        "device used"), as well as for all the peers of that same
@@ -488,6 +491,64 @@ test_gen_ip() {
 	return $status
 }
 
+# generates a subnet from the wireguard interface name
+gen_subnet(){
+	iface=$1
+
+	genbytes=$(echo $iface | sha256sum | grep -o "[0-9a-f]\{2\}")
+
+	subnet="fd"
+	set $genbytes
+	for i in $(seq 0 4); do
+		subnet="${subnet}${1}"
+
+		if [ $i -eq 0 -o $i -eq 2 ]; then
+			subnet="${subnet}:"
+		fi
+
+		shift
+	done
+	echo "$( compress_ipv6 ${subnet}:: )/48"
+}
+
+# unit tests for gen_subnet
+test_gen_subnet(){
+	tests=" \
+		foo     fdb5:bb9d:8014::/48 \
+		bar     fd7d:865e:959b::/48 \
+		wg0     fd58:284e:12bf::/48 \
+		wg1     fd32:1715:2c32::/48 \
+		wg2     fd4f:711b:225b::/48 \
+		wg3     fd81:c7d5:92de::/48 \
+		wg4     fd9e:114e:6d04::/48 \
+		wg5     fd31:ed7c:d55b::/48 \
+		wg6     fddd:57d6:7b3e::/48 \
+		wg7     fd3d:8ab4:9e1b::/48 \
+		wg8     fde3:5806:bd7f::/48 \
+		wg9     fd0e:78e4:9e9e::/48 \
+		wg10    fda9:6b1f:f342::/48 \
+		wg11    fde7:25c:5b18::/48  \
+		wg12    fd96:e5e:72c::/48   \
+		wg13    fd8c:1b9d:db8::/48  \
+		wg14    fd25:25f:3e15::/48  \
+		wg15    fd84:f063:a7f3::/48 \
+		wgtest  fd2d:70d4:9f71::/48 \
+	"
+	set $tests
+	status=0
+	while [ "$#" != 0 ]; do
+		#echo "test 1=$1, 2=$2"
+		printf "."
+		res="$(gen_subnet $1)"
+		if [ "$res" != "$2" ]; then
+			echo "gen_subnet $1: expected $2, got $res"
+			status=1
+		fi
+		shift 2
+	done
+	return $status
+}
+
 # cut an ip to the given length to create a netmask
 cut_ip(){
 	ip=$1
@@ -610,6 +671,10 @@ dryrun(){
 		iface="$(wg show interfaces | tr ' ' '\n' | head -n1)"
 	fi
 
+	if [ "$subnet" = "" -o "$subnet" = "derive" ]; then
+		subnet="$(gen_subnet $iface)"
+	fi
+
 	if [ "$iface" != "" ]; then
 		dryrun_iface "$subnet" "$iface"
 	fi
@@ -697,11 +762,9 @@ runtests() {
 	return $status
 }
 
-# TODO: derive the ipv6 prefix from the interface name?
-
 # default values
 subnet4="10.0.0.0/8"
-subnet6="fd1a:6126:2887::/48"
+subnet6="derive"
 subnet=$subnet6
 device=""
 pubkey=""
@@ -751,6 +814,12 @@ while [ "$#" != 0 ]; do
 			cmd="gen"
 			shift
 			;;
+		gensub)
+			shift
+			iface="$1"
+			cmd="gensub"
+			shift
+			;;
 		dev)
 			shift
 			device="$1"
@@ -785,6 +854,9 @@ case "$cmd" in
 		else
 			cut_ip $ip $asnet
 		fi
+		;;
+	"gensub")
+		gen_subnet $iface
 		;;
 	"dryrun")
 		if [ "$(id -u)" != "0" ]; then
